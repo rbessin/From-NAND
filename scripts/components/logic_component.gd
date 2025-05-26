@@ -1,0 +1,127 @@
+class_name LogicComponent
+extends Node2D
+
+# --- Properties ---
+## Internal state storage
+# Each Input Dictionary: {"identifier": int, "source_node_path": NodePath, "source_pin_id": int, "current_state": bool, "label": String (optional)}
+@export var inputs: Array[Dictionary]
+# Each Output Dictionary: {"identifier": int, "current_state": bool, "next_state": bool, "label": String (optional)}
+@export var outputs: Array[Dictionary]
+
+## Visuals and Interaction
+@export var component_label: String = "COMPONENT"
+@export var component_color: Color = Color.LIGHT_GRAY
+@export var pin_radius: float = 8.0
+@export var pin_color: Color = Color.DARK_SLATE_GRAY
+
+# --- Engine Callbacks ---
+func _ready(): if not Engine.is_editor_hint(): _setup_pins()
+
+func _draw():
+## Component Body
+	var height: float = float(max(inputs.size(), outputs.size(), 1) * 25) + 20
+	var width: float = 100.0
+	var body_rect = Rect2(Vector2(-width / 2.0, -height / 2.0), Vector2(width, height))
+	draw_rect(body_rect, component_color)
+
+## Component Label
+	if component_label:
+		var label_size: Vector2 = ThemeDB.fallback_font.get_string_size(component_label, HORIZONTAL_ALIGNMENT_CENTER, -1, ThemeDB.fallback_font_size)
+		var label_position = Vector2(-label_size.x / 2.0, label_size.y / 2.0 - height/4)
+		draw_string(ThemeDB.fallback_font, label_position, component_label, HORIZONTAL_ALIGNMENT_CENTER, width - 10, ThemeDB.fallback_font_size, Color.BLACK) # Adjust color, width constraint
+
+## Component Inputs
+	if inputs.size() > 0:
+		var xpos: float = -width / 2.0
+		for i in range(inputs.size()):
+			var ypos: float = ((i + 1.0) / float(inputs.size() + 1.0)) * height - (height / 2.0)
+			var pos = Vector2(xpos, ypos)
+			var current_pin_color = pin_color
+			if inputs[i].get("current_state", false) == true: current_pin_color = Color.LIME_GREEN
+			draw_circle(pos, pin_radius / 2.0, current_pin_color)
+
+## Component Outputs
+	if outputs.size() > 0:
+		var xpos: float = width / 2.0
+		for i in range(outputs.size()):
+			var ypos: float = ((i + 1.0) / float(outputs.size() + 1.0)) * height - (height / 2.0)
+			var pos = Vector2(xpos, ypos)
+			var current_pin_color = pin_color
+			if outputs[i].get("current_state", false) == true: current_pin_color = Color.ORANGE_RED
+			draw_circle(pos, pin_radius / 2.0, current_pin_color)
+
+# --- Core Logic Methods ---
+## Calculates the gate's output(s) based on its current input states.
+func _setup_pins() -> void:
+	# Base implementation is empty. Derived classes should override this
+	# to define their specific input/output pin configurations if not set externally.
+	# Example:
+	# inputs.append({"identifier": 0, "source_node_path": null, "source_pin_id": -1, "current_state": false})
+	# outputs.append({"identifier": 0, "current_state": false, "next_state": false, "label": "Q"})
+	pass
+
+## Fetches the current state from all connected source nodes for each input pin.
+func update_input_states() -> void:
+	if Engine.is_editor_hint(): return
+
+	for i in range(inputs.size()):
+		var input_pin = inputs[i]
+		if input_pin.has("source_node_path") and input_pin["source_node_path"] != null and input_pin["source_node_path"] != NodePath(""):
+			var source_node = get_node_or_null(input_pin["source_node_path"])
+			if source_node is LogicComponent:
+				var source_pin_id = input_pin.get("source_pin_id", -1)
+				if source_pin_id != -1: input_pin["current_state"] = source_node.get_output_current_state(source_pin_id)
+				else: input_pin["current_state"] = false # No valid source pin ID
+			else: input_pin["current_state"] = false # No valid source node
+		else: input_pin["current_state"] = false # No source connected
+	queue_redraw() # Redraw to reflect new input states visually
+
+## Calculates the next_state for all output pins based on current input states and component logic.
+func _evaluate() -> void:
+	if Engine.is_editor_hint(): return
+	# Derived classes will implement their specific logic here and set the "next_state" of their output pins.
+	pass
+
+## Commits the calculated next_state to current_state for all output pins.
+## This is typically called by a simulation manager at the end of a tick/evaluation phase.
+func commit_outputs() -> void:
+	if Engine.is_editor_hint(): return
+
+	var changed_state = false
+	for i in range(outputs.size()):
+		var output_pin = outputs[i]
+		if output_pin.get("current_state", false) != output_pin.get("next_state", false):
+			output_pin["current_state"] = output_pin.get("next_state", false)
+			changed_state = true
+	if changed_state: queue_redraw()
+
+# --- Helper methods ---
+## Connects an input source to a specific input index.
+func set_input_source(identifier: int, source_node: Node, source_node_identifier) -> void:
+	if not source_node is LogicComponent: return
+
+	for i in range(inputs.size()):
+		if inputs[i]["identifier"] == identifier: 
+			inputs[i]["source"] = source_node
+			inputs[i]["source_node_path"] = get_path_to(source_node)
+			inputs[i]["source_pin_id"] = source_node_identifier
+			inputs[i]["current_state"] = false # Reset state, will be updated
+			update_input_states() # Immediately try to fetch the new source's state
+			return
+
+## Retrieves the current (stable) state of a specific output pin.
+func get_output_current_state(output_identifier: int) -> bool:
+	for i in range(outputs.size()):
+		if outputs[i]["identifier"] == output_identifier:
+			return outputs[i].get("current_state", false)
+	return false
+
+## Allows directly setting an input pin's state (e.g., for top-level inputs not connected to other LogicComponents)
+func set_external_input_state(input_identifier: int, state: bool) -> void:
+	for i in range(inputs.size()):
+		if inputs[i]["identifier"] == input_identifier:
+			inputs[i]["current_state"] = state
+			inputs[i]["source_node_path"] = null # Clear source if set externally
+			inputs[i]["source_pin_id"] = -1
+			queue_redraw()
+			return
