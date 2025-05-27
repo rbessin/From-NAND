@@ -23,9 +23,6 @@ func _setup_pins() -> void: pass
 ## 2. Collecting results from internal components to set its own external output next_states.
 ## This assumes internal child components are also LogicComponents and are part of the global evaluation tick.
 func _evaluate() -> void:
-	if Engine.is_editor_hint(): return
-	# super._evaluate() # Base class _evaluate currently does nothing.
-
 	# --- 1. Propagate external inputs to internal targets (Conceptual) ---
 	# The actual propagation happens when the internal children call their `update_input_states()`.
 	# For this to work, the `source_node_path` for the relevant input pins of the *first layer*
@@ -50,9 +47,7 @@ func _evaluate() -> void:
 		var child_path = mapping.get("internal_child_path", null)
 		var child_pin_id = mapping.get("internal_child_pin_id", -1)
 
-		if external_output_id == -1 or child_path == null or child_pin_id == -1:
-			#printerr(name, ": Invalid external_output_mapping: ", mapping)
-			continue
+		if external_output_id == -1 or child_path == null or child_pin_id == -1: continue
 
 		var child_node = get_node_or_null(child_path)
 		if child_node is LogicComponent:
@@ -127,4 +122,3 @@ func configure_composite(
 	external_input_mappings = new_input_mappings
 	external_output_mappings = new_output_mappings
 	queue_redraw()
-	# print_debug(name, ": Composite configured. Inputs: ", inputs.size(), " Outputs: ", outputs.size())
