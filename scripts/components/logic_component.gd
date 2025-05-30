@@ -3,9 +3,9 @@ extends Node2D
 
 # --- Properties ---
 ## Internal state storage
-# Each Input Dictionary: {"identifier": int, "source_node_path": NodePath, "source_pin_id": int, "current_state": bool, "label": String (optional)}
+# Each Input Dictionary: {"identifier": int, "source_node_path": NodePath, "source_pin_id": int, "current_state": bool, "label": String, "area_node": Area2D}
 @export var inputs: Array[Dictionary]
-# Each Output Dictionary: {"identifier": int, "current_state": bool, "next_state": bool, "label": String (optional)}
+# Each Output Dictionary: {"identifier": int, "current_state": bool, "next_state": bool, "label": String, "area_node": Area2D}
 @export var outputs: Array[Dictionary]
 
 ## Visuals and Interaction
@@ -14,13 +14,21 @@ extends Node2D
 @export var pin_radius: float = 8.0
 @export var pin_color: Color = Color.DARK_SLATE_GRAY
 
+@export var _dragging: bool = false
+@export var _drag_offset: Vector2
+@export var body_area: Area2D
+
+@export var height: float = float(max(inputs.size(), outputs.size(), 1) * 25) + 20
+@export var width: float = 100.0
+
 # --- Engine Callbacks ---
-func _ready(): if not Engine.is_editor_hint(): _setup_pins()
+func _ready(): 
+	if not Engine.is_editor_hint():
+		_setup_pins()
+		_setup_interactive_areas()
 
 func _draw():
 ## Component Body
-	var height: float = float(max(inputs.size(), outputs.size(), 1) * 25) + 20
-	var width: float = 100.0
 	var body_rect = Rect2(Vector2(-width / 2.0, -height / 2.0), Vector2(width, height))
 	draw_rect(body_rect, component_color)
 
@@ -50,15 +58,105 @@ func _draw():
 			if outputs[i].get("current_state", false) == true: current_pin_color = Color.ORANGE_RED
 			draw_circle(pos, pin_radius / 2.0, current_pin_color)
 
+func _unhandled_input(event: InputEvent) -> void:
+	# Handle mouse motion for dragging at a higher level if dragging is active
+	if _dragging and event is InputEventMouseMotion:
+		global_position = get_global_mouse_position() - _drag_offset
+
 # --- Core Logic Methods ---
 ## Calculates the gate's output(s) based on its current input states.
 func _setup_pins() -> void:
-	# Base implementation is empty. Derived classes should override this
-	# to define their specific input/output pin configurations if not set externally.
-	# Example:
 	# inputs.append({"identifier": 0, "source_node_path": null, "source_pin_id": -1, "current_state": false})
 	# outputs.append({"identifier": 0, "current_state": false, "next_state": false, "label": "Q"})
 	pass
+
+func _setup_interactive_areas() -> void:
+	# --- Create Body Area for Dragging ---
+	if is_instance_valid(body_area): body_area.queue_free()
+
+	body_area = Area2D.new()
+	body_area.name = "BodyArea"
+	add_child(body_area)
+
+	var body_shape = RectangleShape2D.new()
+	body_shape.size = Vector2(width, height)
+	var body_collision_shape = CollisionShape2D.new()
+	body_collision_shape.shape = body_shape
+
+	body_area.add_child(body_collision_shape)
+	body_area.input_event.connect(_on_body_input_event)
+
+	# --- Clear and Create Pin Areas ---
+	for input_pin_data in inputs:
+		if input_pin_data.has("area_node") and is_instance_valid(input_pin_data["area_node"]):
+			input_pin_data["area_node"].queue_free()
+	for output_pin_data in outputs:
+		if output_pin_data.has("area_node") and is_instance_valid(output_pin_data["area_node"]):
+			output_pin_data["area_node"].queue_free()
+
+	# Create Input Pin Areas
+	if inputs.size() > 0:
+		var xpos: float = -width / 2.0
+		for i in range(inputs.size()):
+			var input_pin_data = inputs[i]
+			var ypos: float = ((i + 1.0) / float(inputs.size() + 1.0)) * height - (height / 2.0)
+			var pin_pos = Vector2(xpos, ypos)
+
+			var area = Area2D.new()
+			area.name = "InputArea_" + str(input_pin_data.get("identifier", i))
+			add_child(area)
+			area.position = pin_pos
+			input_pin_data["area_node"] = area
+
+			var shape = CircleShape2D.new()
+			shape.radius = pin_radius / 2.0
+			var collision_shape = CollisionShape2D.new()
+			collision_shape.shape = shape
+			area.add_child(collision_shape)
+
+			area.input_event.connect(_on_pin_input_event.bind(area, "input", input_pin_data["identifier"]))
+
+	# Create Output Pin Areas
+	if outputs.size() > 0:
+		var xpos: float = width / 2.0
+		for i in range(outputs.size()):
+			var output_pin_data = outputs[i]
+			var ypos: float = ((i + 1.0) / float(outputs.size() + 1.0)) * height - (height / 2.0)
+			var pin_pos = Vector2(xpos, ypos)
+
+			var area = Area2D.new()
+			area.name = "OutputArea_" + str(output_pin_data.get("identifier", i))
+			add_child(area)
+			area.position = pin_pos
+			output_pin_data["area_node"] = area
+
+			var shape = CircleShape2D.new()
+			shape.radius = pin_radius / 2.0
+			var collision_shape = CollisionShape2D.new()
+			collision_shape.shape = shape
+			area.add_child(collision_shape)
+
+			area.input_event.connect(_on_pin_input_event.bind(area, "output", output_pin_data["identifier"]))
+
+## Handles input events on the component's body area
+func _on_body_input_event(viewport, event: InputEvent, shape_idx):
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.is_pressed():
+			_dragging = true
+			_drag_offset = get_global_mouse_position() - global_position
+			get_viewport().set_input_as_handled() # Consume event so pins don't also process it
+		else: # Mouse button released
+			_dragging = false
+			get_viewport().set_input_as_handled()
+	# Removed mouse motion handling from here to use _unhandled_input for smoother global dragging
+
+## Handles input events on the pin areas
+func _on_pin_input_event(event: InputEvent, area_node: Area2D, pin_type: String, pin_identifier: int, viewport, shape_idx):
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.is_pressed():
+		if not _dragging:
+			print("Clicked on %s pin with identifier: %s (Node: %s)" % [pin_type, pin_identifier, area_node.name])
+			# Add your logic here, e.g., start a connection, toggle a manual input, etc.
+			get_viewport().set_input_as_handled()
 
 ## Fetches the current state from all connected source nodes for each input pin.
 func update_input_states() -> void:
